@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cowgateway-v1';
+const CACHE_NAME = 'cowgateway-v2';
 const ASSETS = [
   './',
   './index.html',
