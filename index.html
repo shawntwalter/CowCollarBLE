@@ -393,11 +393,11 @@
         <div class="field-label">BLE PIN</div>
         <input type="text" id="pin-input" value="123456" autocomplete="off" spellcheck="false">
       </div>
-      <button class="btn btn-primary" id="btn-connect" onclick="doConnect()">
+      <button class="btn btn-primary" id="btn-connect">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5l11 11M18 12.5V18a1 1 0 01-1 1h-5.5M12.5 6H6a1 1 0 00-1 1v5.5"/><path d="M12 2l3 3-4 4 2 2 4-4 3 3V2h-8z"/></svg>
         SCAN &amp; CONNECT
       </button>
-      <button class="btn btn-danger" id="btn-disconnect" onclick="doDisconnect()" style="display:none;">
+      <button class="btn btn-danger" id="btn-disconnect" style="display:none;">
         DISCONNECT
       </button>
     </div>
@@ -455,11 +455,11 @@
   <!-- Actions -->
   <div id="actions-section">
     <div style="display:flex; gap:10px;">
-      <button class="btn btn-primary" style="flex:1;" onclick="writeAll()">
+      <button class="btn btn-primary" id="btn-write" style="flex:1;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V4m-7 7l7-7 7 7"/></svg>
         WRITE ALL
       </button>
-      <button class="btn btn-save" style="flex:1;" onclick="doSave()">
+      <button class="btn btn-save" id="btn-save" style="flex:1;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
         SAVE &amp; RESTART
       </button>
@@ -470,7 +470,7 @@
   <div class="card">
     <div class="card-header">
       <h2>Log</h2>
-      <span style="font-family:var(--mono);font-size:10px;color:var(--text-dim);cursor:pointer;" onclick="clearLog()">CLEAR</span>
+      <span id="btn-clear-log" style="font-family:var(--mono);font-size:10px;color:var(--text-dim);cursor:pointer;">CLEAR</span>
     </div>
     <div class="log" id="log"></div>
   </div>
@@ -562,14 +562,39 @@ function showDisconnected() {
 
 // ── Connect ──────────────────────────────────────────────────────────────────
 async function doConnect() {
+  // CRITICAL: requestDevice MUST be the very first async call in the
+  // user-gesture handler — Bluefy blocks the picker if anything else
+  // (logging, DOM updates, awaits) runs before it.
+  let pickedDevice;
   try {
+    pickedDevice = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SERVICE] }],
+      optionalServices: [SERVICE],
+    });
+  } catch (err1) {
+    // If filters fail (some Bluefy versions), retry with acceptAllDevices
+    if (err1.name === 'NotFoundError' || err1.name === 'NotSupportedError') {
+      try {
+        pickedDevice = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: [SERVICE],
+        });
+      } catch (err2) {
+        log('Scan cancelled or failed: ' + err2.message, 'error');
+        return;
+      }
+    } else {
+      log('Scan cancelled: ' + err1.message, 'error');
+      return;
+    }
+  }
+
+  // Now safe to do DOM updates and further async work
+  try {
+    device = pickedDevice;
     $btnConn.disabled = true;
     $btnConn.classList.add('scanning');
     log('Scanning for CowGateway…', 'info');
-
-    device = await navigator.bluetooth.requestDevice({
-      filters: [{ services: [SERVICE] }],
-    });
 
     device.addEventListener('gattserverdisconnected', () => {
       log('Device disconnected', 'error');
@@ -692,6 +717,13 @@ async function doSave() {
     log('Save error: ' + err.message, 'error');
   }
 }
+
+// ── Event Listeners (addEventListener for Bluefy gesture trust) ──────────────
+$btnConn.addEventListener('click', doConnect);
+document.getElementById('btn-disconnect').addEventListener('click', doDisconnect);
+document.getElementById('btn-write').addEventListener('click', writeAll);
+document.getElementById('btn-save').addEventListener('click', doSave);
+document.getElementById('btn-clear-log').addEventListener('click', clearLog);
 
 // ── Service Worker Registration ──────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
